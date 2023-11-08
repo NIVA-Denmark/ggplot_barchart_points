@@ -69,19 +69,15 @@ bar_chart <- function(selected_id=NA,
   df <- df %>%
     filter(id==selected_id)
   
-  dir.create(imgdir, showWarnings=F)
-  
   p <- ggplot(df, aes(x=!!as.name(quo_name(xvar)), 
                       y=!!as.name(quo_name(yvar)), 
                       fill=!!as.name(quo_name(group)))) +
     geom_bar(stat = "identity", position="stack") +
-    theme_void(base_size=5) +
+    theme_void(base_size=7) +
     scale_fill_discrete(guide=NULL) +
-    theme(axis.text.x = element_text())
+    theme(axis.text.x = element_text(vjust=3))
 
-  imgfile <- paste0(imgdir,"/bar_",selected_id,".png")
-  ggsave(p, filename=imgfile, width=size_x, height=size_y, units="px", dpi=600)  
-  return(imgfile)
+  return(p)
 }
 ```
 
@@ -91,14 +87,24 @@ Make the bar chart for each station and save them locally
 
 ``` r
 id_list <- unique(df_bar_data$id)
-plot_list <-  purrr::map(id_list, bar_chart, df=df_bar_data) %>% 
-  unlist()
+plot_list <-  purrr::map(id_list, bar_chart, df=df_bar_data) 
 ```
 
 Add the list of image files to the station data frame
 
 ``` r
 df_stns$bar_img <- plot_list
+```
+
+Define positions for the images so that they are slightly offset from
+the station positions.
+
+I haven’t done it here but We could also specify separate sizes for each
+bar chart.
+
+``` r
+df_stns <- df_stns %>%
+  mutate(x_img = lon+0.3, y_img=lat+0.3)
 ```
 
 # Make the plot
@@ -155,8 +161,8 @@ ggplot() +
   geom_point(data=df_stns,aes(x=lon,y=lat)) +
   geom_text(data=df_stns,aes(x=lon,y=lat,label=id),
             hjust=1, vjust=1) +
-  geom_image(data=df_stns,aes(x=lon,y=lat,image=bar_img),
-             nudge_x=0.5, nudge_y=0.5, size=0.1) 
+  geom_subview(data=df_stns,aes(x=x_img,y=y_img,subview=bar_img),
+               width=0.5, height=0.5)
 ```
 
 ![](README_files/figure-gfm/final%20plot-1.png)<!-- -->
