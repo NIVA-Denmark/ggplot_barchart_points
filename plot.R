@@ -80,7 +80,6 @@ df_stns$bar_img <- plot_list
 df_stns <- df_stns %>%
   mutate(x_img = lon+0.3, y_img=lat+0.3)
 
-
 # get a shape file for the Danish EEZ
 eez <- terra::vect("shp/EEZ_polygon.shp")
 terra::crs(eez) <-  terra::crs("EPSG:4326") # add the CRS
