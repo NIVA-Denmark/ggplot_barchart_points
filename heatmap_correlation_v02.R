@@ -81,161 +81,6 @@ library(ggplot2)
 library(scales)
 library(ggrepel)
 #________________________________________________________________________
-# section 04 - start - import phyloseq data frames
-#________________________________________________________________________
-
-psexl06.sam <- read.table(paste0(wd00,"/psexl06.sam.csv"))
-psexl06.otu <- read.table(paste0(wd00,"/psexl06.otu.csv"))
-psexl06.tax <- read.table(paste0(wd00,"/psexl06.tax.csv"))
-# make the tables into phyloseq  data frames
-psexl06.tax01 <- phyloseq::tax_table(as.matrix(psexl06.tax))
-psexl06.otu <- phyloseq::otu_table(psexl06.otu,taxa_are_rows = T)
-psexl06.sam01 <- phyloseq::sample_data(psexl06.sam)
-# merge all phyloseq objects. Note, that these needs to be converted into
-# phyloseq objects before they can be merged
-ps06 <- phyloseq::merge_phyloseq(psexl06.otu, psexl06.tax01,psexl06.sam01)
-psexl06 <- ps06
-#________________________________________________________________________
-# section 04 - end - import phyloseq data frames
-#________________________________________________________________________
-
-# get the phyloseq object data frames and get the sampling data frame
-# and the taxonomy data frame
-
-psexl06.tax <- as.data.frame(psexl06@tax_table)
-psexl06.otu <- as.data.frame(psexl06@otu_table)
-psexl06.sam <- as.data.frame(as.matrix(psexl06@sam_data))
-
-# get the row names as this holds the samplNoID - i.e. 'samplNoID'
-# which is used in the following steps for combining data frames
-# using 'left_join'
-psexl06.sam$samplNoID <- row.names(psexl06.sam)
-# make the phyloseq-otu-table a data frame, and pivot it longer
-# by using the row names (which holds the seq-read-ID - i.e. 'seqNoID')
-# as reference - notice that this is also the common column
-# for using 'left_join' in the next step
-psexl06.otu <- as.data.frame(psexl06@otu_table) %>% 
-  tibble::rownames_to_column(var = "seqNoID") %>%
-  tidyr::pivot_longer(-seqNoID, names_to = "smplNm",
-                      values_to = "seqrd.cnt") %>%
-  dplyr::group_by(smplNm)
-# replace in the column that has the sample no ID
-colnames(psexl06.otu)[grepl("smpl",colnames(psexl06.otu))] <- "samplNoID"
-# use dplyr::left_join to match between data frames 
-psexl06.tax.otu <- dplyr::left_join(psexl06.otu,
-                                    psexl06.tax %>% dplyr::select(
-                                      seqNoID,
-                                      species,
-                                      genus,
-                                      family,
-                                      order,
-                                      class,
-                                      phylum,
-                                      kingdom
-                                    ),
-                                    by = "seqNoID")
-# define columns to keep
-ckeep <- c( "sample_location_no",
-            "Sample_number",
-            "Location",
-            "Latitude",
-            "Longitude",
-            "shsmpTp")
-# ensure the phyloseq matrix is a data frame
-psexl06.sam01 <- as.data.frame(as.matrix(psexl06.sam))
-# copy a column with the sample type
-psexl06.sam01$shsmpTp <-  psexl06.sam01$Sampletype
-# use 'global substitute' to remove the part of the string
-# that is not needed
-psexl06.sam01$shsmpTp <- gsub("Sterivex filter, ","",psexl06.sam01$shsmpTp)
-# subset the data frame to only have the columns required for the 
-# sample stations
-psexl06.sam01<- psexl06.sam01[ckeep]
-# copy columns  to have columns that match the sations data frame
-psexl06.sam01$id <- psexl06.sam01$sample_location_no
-psexl06.sam01$lon <- psexl06.sam01$Longitude
-psexl06.sam01$lat <- psexl06.sam01$Latitude
-psexl06.sam01$samplNoID <- psexl06.sam01$Sample_number
-# use dplyr::left_join to match between data frames 
-psexl06.tax.otu01 <- 
-  dplyr::left_join(psexl06.tax.otu,
-                   psexl06.sam01 %>% dplyr::select(
-                     shsmpTp,
-                     samplNoID,
-                     id,
-                     Location
-                   ),
-                   by = "samplNoID")
-
-#View(psexl06.tax.otu01)
-psexl06.tax.otu01$Category <- psexl06.tax.otu01$shsmpTp
-psexl06.tax.otu01$Species <- psexl06.tax.otu01$family
-psexl06.tax.otu01$n <- psexl06.tax.otu01$seqrd.cnt
-#colnames(df_bar_data)
-ckeep <- c("id","Species","Category","n" )
-df_bar_data2 <- psexl06.tax.otu01[ckeep]
-# use the 'substr' function to get only the first letter of the text string
-df_bar_data2$Category <- substr(df_bar_data2$Category,1,1)
-# define columns to keep
-ckeep <- c("id", "lon", "lat")
-df_stns2 <- psexl06.sam01[ckeep]
-
-#:
-ps06.otu <- as.data.frame(ps06@otu_table)
-ps06.tax <- as.data.frame(ps06@tax_table)
-# get family per row names, nad order and class
-ps06.otu_family <- ps06.tax$family[match(rownames(ps06.otu),ps06.tax$seqNoID)]
-ps06.otu_order <- ps06.tax$order[match(rownames(ps06.otu),ps06.tax$seqNoID)]
-ps06.otu_class <- ps06.tax$class[match(rownames(ps06.otu),ps06.tax$seqNoID)]
-# paste together class order  and family to get a taxonomic group
-ps06.otu_txgrp <- paste(ps06.otu_class,
-                        ps06.otu_order,
-                        ps06.otu_family,
-                        sep="_")
-# identify not assignable catecories
-ps06.otu_txgrp[grepl("NA_NA_NA",ps06.otu_txgrp)] <- "not_assignable"
-# add as a column
-ps06.otu$txgrp  <- ps06.otu_txgrp
-# sum multiple columns per group
-# https://stackoverflow.com/questions/1660124/how-to-sum-a-variable-by-group
-ps06.otu <- ps06.otu %>% 
-  group_by(txgrp) %>% 
-  summarise(across(everything(), sum))
-# make the tibble a data frame
-ps06.otu <- as.data.frame(ps06.otu)
-# replace the row names
-rownames(ps06.otu) <- ps06.otu$txgrp
-# remove the row names
-ps06.otu$txgrp <- NULL
-
-# get the sample data - this will serve as the 'meta_table'
-ps06.sam <- as.data.frame(ps06@sam_data)
-# get the sampling time and the freezing time
-Tm.st <- ps06.sam$Time
-Tm.en <- ps06.sam$Freezing_time
-# calculate the difference in seconds between the sampling  and the
-# freezing of the sample
-#https://stackoverflow.com/questions/68825149/calculate-time-difference-between-2-timestamps-in-hours-using-r
-library(lubridate)
-differ_hrs.in.sec<- as.numeric(difftime(Tm.en, Tm.st, 
-                                        units = "secs"))
-out <- seconds_to_period(differ_hrs.in.sec)
-differ_HHMM <- sprintf('%02d:%02d', out@hour, out$minute)
-# add back difference in seconds onto the sample data frame
-ps06.sam$dif.sec <- differ_hrs.in.sec
-# and calculate the difference in hours
-ps06.sam$dif.hrs<- ps06.sam$dif.sec/(60*60)
-# 
-ps06.sam$smplTp <- gsub("Sterivex filter, ","",ps06.sam$Sampletype)
-ps06.sam$smplLcNo_Type <- paste0(ps06.sam$sample_location_no,"_",ps06.sam$smplTp)
-# replace the column names with location numbers plus 
-# the sampling type
-colnames(ps06.otu) <- ps06.sam$smplLcNo_Type[match(colnames(ps06.otu),
-                                                   ps06.sam$Sample_number)]
-
-
-
-#________________________________________________________________________
 # section 01 -  start - Try correlation map
 #________________________________________________________________________
 # Trying to use the part with:
@@ -258,47 +103,84 @@ colnames(ps06.otu) <- ps06.sam$smplLcNo_Type[match(colnames(ps06.otu),
 SPE_pitlatrine <- "https://userweb.eng.gla.ac.uk/umer.ijaz/bioinformatics/ecological/SPE_pitlatrine.csv"
 # and then read in the file
 abund_table<-read.csv(SPE_pitlatrine,row.names=1,check.names=FALSE)
-abund_table2 <- ps06.otu
+# read in otu and sam data frames from csv files
+ps06.otu.gh <- "https://github.com/NIVA-Denmark/ggplot_barchart_points/raw/main/psexl06.otu.csv"
+ps06.sam.gh <- "https://github.com/NIVA-Denmark/ggplot_barchart_points/raw/main/psexl06.sam.csv"
+ps06.tax.gh <- "https://github.com/NIVA-Denmark/ggplot_barchart_points/raw/main/psexl06.tax.csv"
+# read in csv files from github
+abund_table2<-read.csv(ps06.otu.gh,row.names=1,check.names=FALSE, sep=" ")
+tax_table2<-read.csv(ps06.tax.gh,row.names=1,check.names=FALSE, sep=" ")
+# make a column that has phylum, class, order, family, genus and species
+tax_table2$pcofgs  <- paste(tax_table2$phylum,
+                            tax_table2$class,
+                            tax_table2$order,
+                            tax_table2$family,
+                            tax_table2$genus,
+                            tax_table2$species,
+                            sep="_")
+# get a new column with name comprising 'phylum, class, order, family, genus and species'
+abund_table2$pcofgs <- tax_table2$pcofgs[match(row.names(abund_table2),tax_table2$qseqid)]
+# sum across groups - see this question: https://stackoverflow.com/questions/1660124/how-to-sum-a-variable-by-group
+abund_table2 <- abund_table2 %>% 
+  group_by(pcofgs) %>% 
+  summarise(across(everything(), sum))
+# make the tibble a data frame
+abund_table2 <- as.data.frame(abund_table2)
+# then replace the row names with name comprising 'phylum, class, order, family, genus and species'
+row.names(abund_table2) <- abund_table2$pcofgs
+# and get rid of the column that holds the name comprising 'phylum, class, order, family, genus and species'
+abund_table2$pcofgs <- NULL
 # also get the path for the 'ENV_pitlatrine' file
 ENV_pitlatrine <- "https://userweb.eng.gla.ac.uk/umer.ijaz/bioinformatics/ecological/ENV_pitlatrine.csv"
+# read in csv file from github page
+meta_table<-read.csv(ENV_pitlatrine,row.names=1,check.names=FALSE)
 #Transpose the data to have sample names on rows
 abund_table<-t(abund_table)
 abund_table2<-t(abund_table2)
-
-
-meta_table<-read.csv(ENV_pitlatrine,row.names=1,check.names=FALSE)
-meta_table2 <- ps06.sam
-# ensure all columns have numeric values
-
-rownames(meta_table2) <- ps06.sam$smplLcNo_Type[match(rownames(meta_table2),
-                                                      ps06.sam$Sample_number)]
+# read in the sample data frame as the meta data
+meta_table2<-read.csv(ps06.sam.gh,row.names=1,check.names=FALSE, sep=" ")
+# make a column that has both the sample location number and
+# the sampling type
+meta_table2$smpl.tp.lcno <- paste0(gsub("Sterivex filter, ",
+                                        "",meta_table2$Sampletype),
+                                   "_",meta_table2$sample_location_no)
+# replace row names
+row.names(meta_table2) <- meta_table2$smpl.tp.lcno
+# arrange row names to have the sample type first then followed
+# by sampling location number
+row.names(abund_table2) <- meta_table2$smpl.tp.lcno[match(row.names(abund_table2),meta_table2$Sample_number)]
 #Just a check to ensure that the samples in meta_table are in the same order as in abund_table
-meta_table<-meta_table[rownames(abund_table),]
-meta_table2<-meta_table2[rownames(abund_table2),]
+meta_table==meta_table[rownames(abund_table),]
+meta_table2==meta_table2[rownames(abund_table2),]
 
 #Filter out samples with fewer counts
 #abund_table<-abund_table[rowSums(abund_table)>200,]
 
 #Extract the corresponding meta_table for the samples in abund_table
 meta_table2<-meta_table2[rownames(abund_table2),]
+# replace in column names as these perhaps might cause problems later on
+colnames(meta_table2) <- gsub("\\.","_",colnames(meta_table2))
+colnames(meta_table2) <- gsub("\\º","",colnames(meta_table2))
+# change some of the long odd column names
+colnames(meta_table2)[grepl("volume_filt",colnames(meta_table2))] <- 'FvolmL'
+colnames(meta_table2)[grepl("Temperature",colnames(meta_table2))] <- 'TmpC'
+colnames(meta_table2)[grepl("Qubit_tube",colnames(meta_table2))] <- 'QuCnngmL'
 
-#You can use sel_env to specify the variables you want to use and sel_env_label to specify the labes for the pannel
-sel_env <- c( #"Date", 
-  #"Time",
-  #"Sampletype",
-  "Water_volume_filtered_.mL.",
+#You can use sel_env to specify the variables you want to use 
+# and sel_env_label to specify the labes for the pannel
+sel_env2 <- c(
+  "FvolmL",
   "pH",
-  "Temperature_.ºC.", 
-  #"Freezing_time",
-  "Qubit_tube_concentration_with_2ul_sample_.ng.ml.", 
+  "TmpC",
+  "QuCnngmL",
   "Dilution",
   "Sample_no",
   "long",
   "lat",
-  "DVFI", 
-  #"DV",
-  "dif.hrs")
-#sel_env<-c("pH","Temp","TS","VS","VFA","CODt","CODs","perCODsbyt","NH4","Prot","Carbo")
+  "DVFI"
+)
+# 
+sel_env<-c("pH","Temp","TS","VS","VFA","CODt","CODs","perCODsbyt","NH4","Prot","Carbo")
 sel_env_label <- list(
   'pH'="PH",
   'Temp'="Temperature",
@@ -313,79 +195,100 @@ sel_env_label <- list(
   'Carbo'="Carbon"
 )
 #
-sel_env_label <- list(
-  #'Date'="Date", 
-  #'Time'="Time",
-  #'smplTp'="Sampletype",
-  'FvolmL'="Water_volume_filtered_.mL.",
-  'pH'="pH",
-  'Temp'="Temperature_.ºC.",
-  #'FreezT'="Freezing_time",
-  'QuConcngmL'= "Qubit_tube_concentration_with_2ul_sample_.ng.ml.",
-  'Dilution'="Dilution",
-  'Sampleno'="Sample_no",
-  'long'="long",
-  'lat'="lat",
-  'DVFI'= "DVFI",
-  #'DV'="DV",
-  'difhrs'='dif.hrs')
+sel_env_label2 <- list(
+  "FvolmL"='FvolmL', 
+  "pH"='pH',
+  "TmpC"='TmpC',
+  "QuCnngmL"='QuCnngmL', 
+  "Dilution"='Dilution',
+  "Sample_no"='Sampleno', 
+  "Longitude"='long', 
+  "Latitude"='lat',
+  "DVFI"='DVFI')
 #
-sel_env_label<-t(as.data.frame(sel_env_label))
+
+#sel_env_label<-t(as.data.frame(sel_env_label))
+#sel_env_label2<-t(as.data.frame(sel_env_label2))
 sel_env_label<-as.data.frame(sel_env_label)
+sel_env_label2<-as.data.frame(sel_env_label2)
 colnames(sel_env_label)<-c("Trans")
+colnames(sel_env_label2)<-c("Trans")
 sel_env_label$Trans<-as.character(sel_env_label$Trans)
-
+sel_env_label2$Trans<-as.character(sel_env_label2$Trans)
+# head(sel_env_label,4)
+# head(sel_env_label2,4)
 #Now get a filtered table based on sel_env
-meta_table_filtered<-meta_table2[,sel_env]
-abund_table_filtered<-abund_table2[rownames(meta_table_filtered),]
+meta_table_filtered<-meta_table[,sel_env]
+meta_table_filtered2<-meta_table2[,sel_env2]
 
-# replace 'too low' with zero
-meta_table_filtered$Qubit_tube_concentration_with_2ul_sample_.ng.ml.[grep("low",meta_table_filtered$Qubit_tube_concentration_with_2ul_sample_.ng.ml.)] <- 0
+abund_table_filtered<-abund_table[rownames(meta_table_filtered),]
+abund_table_filtered2<-abund_table2[rownames(meta_table_filtered2),]
 # ensure all columns have numeric values
 meta_table_filtered[] <- lapply(meta_table_filtered, as.numeric)
+meta_table_filtered2[] <- lapply(meta_table_filtered2, as.numeric)
 # replace NAs with zero for pH - not really apropriate, but ...
 meta_table_filtered$pH[is.na(meta_table_filtered$pH)] <- 0
-# ensure all columns have numeric values
-meta_table_filtered[] <- lapply(meta_table_filtered, as.numeric)
+meta_table_filtered2$pH[is.na(meta_table_filtered2$pH)] <- 0
+meta_table_filtered2$QuCnngmL[is.na(meta_table_filtered2$QuCnngmL)] <- 0
 
 #Apply normalisation (either use relative or log-relative transformation)
 #x<-abund_table_filtered/rowSums(abund_table_filtered)
 x<-log((abund_table_filtered+1)/(rowSums(abund_table_filtered)+
                                    dim(abund_table_filtered)[2]))
 
+x2<-log((abund_table_filtered2+1)/(rowSums(abund_table_filtered2)+
+                                     dim(abund_table_filtered2)[2]))
+
 x<-x[,order(colSums(x),decreasing=TRUE)]
+x2<-x2[,order(colSums(x2),decreasing=TRUE)]
 #Extract list of top N Taxa
 N<-51
+N2<- ncol(abund_table2)
+
 taxa_list<-colnames(x)[1:N]
+taxa_list2<-colnames(x2)[1:N2]
+
 #remove "__Unknown__" and add it to others
 taxa_list<-taxa_list[!grepl("Unknown",taxa_list)]
+taxa_list2<-taxa_list2[!grepl("Unknown",taxa_list2)]
 N<-length(taxa_list)
+N2<-length(taxa_list2)
 x<-data.frame(x[,colnames(x) %in% taxa_list])
+x2<-data.frame(x2[,colnames(x2) %in% taxa_list2])
 y<-meta_table_filtered
+y2<-meta_table_filtered2
 
 # ensure all columns have numeric values
 #abund_table2[] <- lapply(abund_table2, as.numeric)
-
-abund_table <- abund_table2
 #Get grouping information
 grouping_info<-data.frame(row.names=rownames(abund_table),
                           t(as.data.frame(strsplit(rownames(abund_table),
                                                    "_"))))
-# > head(grouping_info)
+
+#Get grouping information
+grouping_info2<-data.frame(row.names=rownames(abund_table2),
+                           t(as.data.frame(strsplit(rownames(abund_table2),
+                                                    "_"))))
+# 
+# head(grouping_info)
 # X1 X2 X3
 # T_2_1   T  2  1
 # T_2_10  T  2 10
 # T_2_12  T  2 12
-# T_2_2   T  2  2
-# T_2_3   T  2  3
-# T_2_6   T  2  6
+# head(grouping_info2)
 
 #Let us group on countries
 groups<-grouping_info[,1]
+groups2<-grouping_info2[,1]
+
+x <- x2
+y <- y2
+groups <- groups2
 
 #You can use kendall, spearman, or pearson below:
-method<-"kendall"
-
+method<-"kendall" 
+method<-"pearson" 
+#method<-"spearman"
 
 #Now calculate the correlation between individual Taxa and the environmental data
 df<-NULL
@@ -452,7 +355,8 @@ if(adjustment==1){
 }
 
 #Now we generate the labels for signifant values
-df$Significance<-cut(df$AdjPvalue, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))
+df$Significance<-cut(df$AdjPvalue, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf),
+                     label=c("***", "**", "*", ""))
 
 #We ignore NAs
 df<-df[complete.cases(df),]
@@ -462,16 +366,30 @@ df<-df[complete.cases(df),]
 
 #We use the function to change the labels for facet_grid in ggplot2
 Env_labeller <- function(variable,value){
-  return(sel_env_label[as.character(value),"Trans"])
+  return(sel_env_label2[as.character(value),"Trans"])
 }
 
 p <- ggplot(aes(x=Type, y=Taxa, fill=Correlation), data=df)
 p <- p + geom_tile() + scale_fill_gradient2(low="#2C7BB6", mid="white", high="#D7191C") 
 p<-p+theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))
 p<-p+geom_text(aes(label=Significance), color="black", size=3)+labs(y=NULL, x=NULL, fill=method)
-p<-p+facet_grid(. ~ Env, drop=TRUE,scale="free",space="free_x",labeller=Env_labeller)
+#p<-p+facet_grid(. ~ Env, drop=TRUE,scale="free",space="free_x",labeller=Env_labeller)
+p<-p+facet_grid(. ~ Env, drop=TRUE,scale="free",space="free_x")
+#p<-p+facet_grid(Env ~ ., labeller = labeller(day_count=labels_param))
+
 #pdf(paste("Correlation_",adjustment_label[adjustment],".pdf",sep=""),height=8,width=22)
 print(p)
+
+#set variable to define if figures are to be saved
+bSaveFigures<-T
+if(bSaveFigures==T){
+  ggsave(plot = p, 
+         filename = paste0(wd00,"/Fig29_v01_heatmap_correlat.png"),
+         width=210*2,height=297*2.4,
+         #width=297,height=210,
+         units="mm",dpi=300)
+}
+# end 'bSaveFigures' test
 
 
 #________________________________________________________________________
